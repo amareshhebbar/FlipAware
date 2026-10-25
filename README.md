@@ -2,6 +2,17 @@
 
 Embedding models fine tuned to tell apart sentences that look alike but mean different things: negation, numbers, swapped roles, time order, quantifiers, hedges, swapped entities, and scope. Every release is a drop in replacement for its base model and reports general retrieval next to the trap test.
 
+### What we are building
+
+Embedding models turn sentences into vectors so similar meanings sit close together. Today’s popular embedders are lazy: they mostly match shared words. So “the drug is safe” and “the drug is not safe” come out nearly identical, and search returns the wrong document.
+
+FlipAware Embed fixes that. We take three existing small embedders and train them to notice the small edits that flip meaning. These are negation, numbers, who did what to whom, time order, some vs all, might vs will, swapped names, and scope. While they learn this, we make sure they stay just as good at normal search.
+
+### Why it matters: 
+
+It is a real, visible flaw with a clean before and after proof. It is also the fastest project in Weight Lab to finish end to end, so it sets up the pipeline (data, train, evaluate, publish) that every later project reuses.
+
+
 ## Pipeline
 
 | Stage | What it does |
