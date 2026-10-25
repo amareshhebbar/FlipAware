@@ -5,7 +5,7 @@ import time
 
 import torch
 
-from flipaware.common import gpu_info, load_cfg, log, write_json
+from flipaware.common import gpu_info, hf_token, load_cfg, log, write_json
 
 
 def versions():
@@ -34,7 +34,7 @@ def gpu_smoke(info):
 
 def hf_checks(cfg):
     out = {}
-    token = os.environ.get("HF_TOKEN")
+    token = hf_token()
     if not token:
         out["hf_token"] = False
         return out
@@ -84,7 +84,10 @@ def main():
         log("gated models without access:", ", ".join(bad))
         sys.exit(1)
     if not info.get("hf_token"):
-        log("HF_TOKEN missing or invalid; gated downloads and publishing will fail")
+        log("no HuggingFace login found; gated downloads and publishing will fail")
+        if os.environ.get("FLIP_PUBLISH", "1") == "1":
+            sys.exit(1)
+    log(f"models this run: {', '.join(cfg['run']['models'])}")
     log("gpu check passed")
 
 

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -14,15 +15,12 @@ stop_pod() {
 }
 trap stop_pod EXIT
 
-STAGES=(s00_gpu_check s01_data s02_generate s03_filter s04_splits s05_train s06_eval s07_report s08_publish)
+STAGES=(s00_gpu_check s01_data s02_generate s03_filter s04_splits s05_dataset s06_models s07_finalize)
 FROM="${FLIP_FROM:-0}"
 
 for i in "${!STAGES[@]}"; do
   [ "$i" -lt "$FROM" ] && continue
   st="${STAGES[$i]}"
-  if [ "$st" = "s08_publish" ] && [ "${FLIP_PUBLISH:-1}" != "1" ]; then
-    continue
-  fi
   py="$PY"
   if [ "$st" = "s02_generate" ]; then
     py="$GEN_PY"

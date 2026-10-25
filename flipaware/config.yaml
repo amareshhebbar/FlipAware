@@ -27,8 +27,8 @@ profiles:
     handcheck: 40
     retrieval_pairs: 2000
     guard_pairs: 1000
-    models: [minilm_l6, bge_small, embeddinggemma_300m]
-    ablation_models: [bge_small]
+    models: [minilm_l6]
+    ablation_models: [minilm_l6]
     seeds: [0]
     epochs: 1
     batch_size: 32
@@ -40,6 +40,11 @@ profiles:
     nanobeir: [scifact, nfcorpus, fiqa2018]
     repo_suffix: _smoke
     private: true
+    collect_all: true
+    verdict:
+      min_trap_gain: 0.0
+      max_ndcg_drop: 0.05
+      private_if_bad: false
   full:
     seed_pool: 40000
     seeds_per_type: 3600
@@ -64,6 +69,11 @@ profiles:
     nanobeir: [arguana, climatefever, dbpedia, fever, fiqa2018, hotpotqa, msmarco, nfcorpus, nq, quoraretrieval, scidocs, scifact, touche2020]
     repo_suffix: ""
     private: false
+    collect_all: false
+    verdict:
+      min_trap_gain: 0.05
+      max_ndcg_drop: 0.01
+      private_if_bad: true
 
 models:
   minilm_l6:

@@ -49,13 +49,39 @@ def load_cfg():
     profile = detect_profile(platform)
     if profile not in cfg["profiles"]:
         raise SystemExit(f"unknown profile {profile}")
+    run = dict(cfg["profiles"][profile])
+    if os.environ.get("FLIP_MODELS"):
+        keys = [k.strip() for k in os.environ["FLIP_MODELS"].split(",") if k.strip()]
+        bad = [k for k in keys if k not in cfg["models"]]
+        if bad:
+            raise SystemExit(f"unknown models in FLIP_MODELS: {bad}; choose from {list(cfg['models'])}")
+        run["models"] = keys
+        run["ablation_models"] = [k for k in (run.get("ablation_models") or []) if k in keys]
     work = detect_work(platform, profile)
     paths = {"work": work}
     for name in ("data", "runs", "results", "assets", "publish"):
         paths[name] = work / name
         paths[name].mkdir(parents=True, exist_ok=True)
-    cfg.update(platform=platform, profile=profile, run=cfg["profiles"][profile], paths=paths)
+    cfg.update(platform=platform, profile=profile, run=run, paths=paths)
     return cfg
+
+
+def hf_token():
+    if os.environ.get("HF_TOKEN"):
+        return os.environ["HF_TOKEN"]
+    try:
+        from huggingface_hub import get_token
+
+        return get_token()
+    except Exception:
+        return None
+
+
+def run_module(mod, *args):
+    import subprocess
+    import sys
+
+    return subprocess.run([sys.executable, "-m", mod, *[str(a) for a in args]], cwd=str(REPO)).returncode
 
 
 def read_json(path):
@@ -218,18 +244,30 @@ def run_dir(cfg, mkey, vname, seed):
     return cfg["paths"]["runs"] / f"{mkey}__{vname}__s{seed}"
 
 
-def plan_runs(cfg):
+def runs_for(cfg, m):
     run = cfg["run"]
     head = cfg["headline_variant"]
-    plan = []
-    for m in run["models"]:
-        for s in run["seeds"]:
-            plan.append((m, head, s))
-        if m in (run.get("ablation_models") or []):
-            for v in cfg["variants"]:
-                if v != head:
-                    plan.append((m, v, run["seeds"][0]))
+    plan = [(head, s) for s in run["seeds"]]
+    if m in (run.get("ablation_models") or []):
+        plan += [(v, run["seeds"][0]) for v in cfg["variants"] if v != head]
     return plan
+
+
+def plan_runs(cfg):
+    return [(m, v, s) for m in cfg["run"]["models"] for v, s in runs_for(cfg, m)]
+
+
+def dev_acc(cfg, m, v, s):
+    p = run_dir(cfg, m, v, s) / "train_log.json"
+    if not p.exists():
+        return None
+    vals = [e["eval_trapdev_accuracy"] for e in read_json(p) if "eval_trapdev_accuracy" in e]
+    return vals[-1] if vals else None
+
+
+def best_seed(cfg, m, seeds):
+    head = cfg["headline_variant"]
+    return max((dev_acc(cfg, m, head, s) or 0.0, s) for s in seeds)[1]
 
 
 def repo_name(cfg, mkey):
