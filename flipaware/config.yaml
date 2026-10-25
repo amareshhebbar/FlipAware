@@ -1,0 +1,166 @@
+project:
+  name: FlipAware
+  hf_user: AmareshHebbar
+  github: amareshhebbar/flipaware
+  collection_title: FlipAware Embeddings
+  collection_description: Embedders fine tuned to separate sentences that look alike but mean different things.
+
+trap_types:
+  negation: Add or remove a negation so the meaning flips, for example is and is not, can and cannot, always and never.
+  numbers: Change one number, amount, date, or unit so the stated fact becomes different.
+  role_swap: Swap who does what to whom while reusing the same words, for example the dog bit the man and the man bit the dog.
+  time_order: Reverse the order of two events, or change before into after.
+  quantifier: Change a quantifier so the claim covers a different amount, for example some, all, none, most, few.
+  hedge: Change how certain the claim is, for example might and will, possibly and definitely, rarely and always.
+  entity_swap: Replace one specific person, place, organization, or object with a different one of the same kind.
+  scope: Move a modifier or negation so it applies to a different part of the sentence, for example only A did B and A did only B.
+
+profiles:
+  small:
+    seed_pool: 4000
+    seeds_per_type: 40
+    target_per_type: null
+    generator: Qwen/Qwen3-1.7B
+    gen_backend: transformers
+    gen_batch: 32
+    nli_model: cross-encoder/nli-deberta-v3-base
+    handcheck: 40
+    retrieval_pairs: 2000
+    guard_pairs: 1000
+    models: [minilm_l6, bge_small, embeddinggemma_300m]
+    ablation_models: [bge_small]
+    seeds: [0]
+    epochs: 1
+    batch_size: 32
+    mini_batch: 16
+    max_seq_len: 128
+    eval_seq_len: 256
+    dev_max: 300
+    eval_steps: 25
+    nanobeir: [scifact, nfcorpus, fiqa2018]
+    repo_suffix: _smoke
+    private: true
+  full:
+    seed_pool: 40000
+    seeds_per_type: 3600
+    target_per_type: 2500
+    generator: Qwen/Qwen3-8B
+    gen_backend: auto
+    gen_batch: 2048
+    nli_model: cross-encoder/nli-deberta-v3-large
+    handcheck: 500
+    retrieval_pairs: 20000
+    guard_pairs: 8000
+    models: [minilm_l6, bge_small, bge_base, e5_base, arctic_m, gte_modernbert, nomic_modernbert, granite_r2, embeddinggemma_300m, embeddinggemma_2, mxbai_large, qwen3_emb_06b]
+    ablation_models: [bge_base, qwen3_emb_06b]
+    seeds: [0, 1, 2]
+    epochs: 2
+    batch_size: 128
+    mini_batch: 32
+    max_seq_len: 256
+    eval_seq_len: 512
+    dev_max: 2000
+    eval_steps: 50
+    nanobeir: [arguana, climatefever, dbpedia, fever, fiqa2018, hotpotqa, msmarco, nfcorpus, nq, quoraretrieval, scidocs, scifact, touche2020]
+    repo_suffix: ""
+    private: false
+
+models:
+  minilm_l6:
+    id: sentence-transformers/all-MiniLM-L6-v2
+    tail: all_MiniLM_L6_v2
+    license: apache-2.0
+  bge_small:
+    id: BAAI/bge-small-en-v1.5
+    tail: bge_small_en_v1.5
+    license: mit
+    query_prompt: "Represent this sentence for searching relevant passages: "
+  bge_base:
+    id: BAAI/bge-base-en-v1.5
+    tail: bge_base_en_v1.5
+    license: mit
+    query_prompt: "Represent this sentence for searching relevant passages: "
+  e5_base:
+    id: intfloat/e5-base-v2
+    tail: e5_base_v2
+    license: mit
+    query_prompt: "query: "
+    doc_prompt: "passage: "
+    sym_prompt: "query: "
+  arctic_m:
+    id: Snowflake/snowflake-arctic-embed-m-v1.5
+    tail: arctic_embed_m_v1.5
+    license: apache-2.0
+    query_prompt: "Represent this sentence for searching relevant passages: "
+  gte_modernbert:
+    id: Alibaba-NLP/gte-modernbert-base
+    tail: gte_modernbert_base
+    license: apache-2.0
+  nomic_modernbert:
+    id: nomic-ai/modernbert-embed-base
+    tail: modernbert_embed_base
+    license: apache-2.0
+    query_prompt: "search_query: "
+    doc_prompt: "search_document: "
+    sym_prompt: "clustering: "
+  granite_r2:
+    id: ibm-granite/granite-embedding-english-r2
+    tail: granite_embedding_english_r2
+    license: apache-2.0
+  embeddinggemma_300m:
+    id: google/embeddinggemma-300m
+    tail: embeddinggemma_300m
+    license: gemma
+    gated: true
+    no_fp16: true
+    query_prompt: "task: search result | query: "
+    doc_prompt: "title: none | text: "
+    sym_prompt: "task: sentence similarity | query: "
+  embeddinggemma_2:
+    id: google/embeddinggemma-2
+    tail: embeddinggemma_2
+    license: apache-2.0
+    gated: true
+    no_fp16: true
+    config_kwargs:
+      vision_config: null
+      audio_config: null
+    query_prompt: "task: search result | query: "
+    doc_prompt: "title: none | text: "
+    sym_prompt: "task: sentence similarity | query: "
+  mxbai_large:
+    id: mixedbread-ai/mxbai-embed-large-v1
+    tail: mxbai_embed_large_v1
+    license: apache-2.0
+    query_prompt: "Represent this sentence for searching relevant passages: "
+  qwen3_emb_06b:
+    id: Qwen/Qwen3-Embedding-0.6B
+    tail: Qwen3_Embedding_0.6B
+    license: apache-2.0
+    lr: 1.0e-5
+    query_prompt: "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:"
+    sym_prompt: "Instruct: Retrieve semantically similar text\nQuery:"
+
+variants:
+  full_guard: {lora: false, guard: true}
+  full_noguard: {lora: false, guard: false}
+  lora_guard: {lora: true, guard: true}
+  lora_noguard: {lora: true, guard: false}
+
+headline_variant: full_guard
+
+train:
+  lr_full: 2.0e-5
+  lr_lora: 1.0e-4
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  guard_weight: 1.0
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  matryoshka_dims: [1024, 768, 512, 256, 128, 64]
+
+filter:
+  entail_min: 0.7
+  equiv_max: 0.5
+  trap_overlap_min: 0.5
