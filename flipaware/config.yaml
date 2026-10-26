@@ -3,7 +3,7 @@ project:
   hf_user: AmareshHebbar
   github: amareshhebbar/flipaware
   collection_title: FlipAware Embeddings
-  collection_description: Embedders fine tuned to separate sentences that look alike but mean different things.
+  collection_description: Embedders fine tuned to separate sentences that look alike but mean different things, plus the data, benchmarks, and leaderboard.
 
 trap_types:
   negation: Add or remove a negation so the meaning flips, for example is and is not, can and cannot, always and never.
@@ -15,12 +15,25 @@ trap_types:
   entity_swap: Replace one specific person, place, organization, or object with a different one of the same kind.
   scope: Move a modifier or negation so it applies to a different part of the sentence, for example only A did B and A did only B.
 
+trap_examples:
+  negation: ["The bridge is safe for heavy trucks.", "The bridge is safe for large trucks.", "The bridge is not safe for heavy trucks."]
+  numbers: ["The museum opens at 9 in the morning.", "The museum's doors open at 9 a.m.", "The museum opens at 11 in the morning."]
+  role_swap: ["The teacher praised the student.", "The student was praised by the teacher.", "The student praised the teacher."]
+  time_order: ["She graduated before she moved to Berlin.", "She finished her degree and then moved to Berlin.", "She graduated after she moved to Berlin."]
+  quantifier: ["Some of the samples were contaminated.", "A few of the samples were contaminated.", "All of the samples were contaminated."]
+  hedge: ["The update might fix the battery issue.", "The update may solve the battery issue.", "The update will fix the battery issue."]
+  entity_swap: ["The treaty was signed in Paris.", "Paris is where the treaty was signed.", "The treaty was signed in Vienna."]
+  scope: ["Only the manager approved the budget.", "The budget was approved by the manager alone.", "The manager approved only the budget."]
+
 profiles:
   small:
     seed_pool: 4000
+    human_anchor_pool: 300
     seeds_per_type: 40
     target_per_type: null
     generator: Qwen/Qwen3-1.7B
+    xgen_generator: microsoft/Phi-4-mini-instruct
+    xgen_seeds_max: 60
     gen_backend: transformers
     gen_batch: 32
     nli_model: cross-encoder/nli-deberta-v3-base
@@ -29,6 +42,14 @@ profiles:
     guard_pairs: 1000
     models: [minilm_l6]
     ablation_models: [minilm_l6]
+    scaling_models: [minilm_l6]
+    scaling_sizes: [50, 120]
+    blend_models: [minilm_l6]
+    blend_alphas: [0.25, 0.5, 0.75]
+    onnx_models: [minilm_l6]
+    mteb_tasks: [SciFact]
+    leaderboard: [minilm_l6, bge_small, e5_small]
+    lb_nanobeir: false
     seeds: [0]
     epochs: 1
     batch_size: 32
@@ -37,6 +58,9 @@ profiles:
     eval_seq_len: 256
     dev_max: 300
     eval_steps: 25
+    passage_max: 300
+    nevir_max: 300
+    bootstrap: 500
     nanobeir: [scifact, nfcorpus, fiqa2018]
     repo_suffix: _smoke
     private: true
@@ -44,12 +68,16 @@ profiles:
     verdict:
       min_trap_gain: 0.0
       max_ndcg_drop: 0.05
+      min_xgen_gain: -1.0
       private_if_bad: false
   full:
     seed_pool: 40000
+    human_anchor_pool: 3000
     seeds_per_type: 3600
     target_per_type: 2500
     generator: Qwen/Qwen3-8B
+    xgen_generator: microsoft/phi-4
+    xgen_seeds_max: 2000
     gen_backend: auto
     gen_batch: 2048
     nli_model: cross-encoder/nli-deberta-v3-large
@@ -58,6 +86,14 @@ profiles:
     guard_pairs: 8000
     models: [minilm_l6, bge_small, bge_base, e5_base, arctic_m, gte_modernbert, nomic_modernbert, granite_r2, embeddinggemma_300m, embeddinggemma_2, mxbai_large, qwen3_emb_06b]
     ablation_models: [bge_base, qwen3_emb_06b]
+    scaling_models: [bge_base]
+    scaling_sizes: [1000, 2500, 5000, 10000]
+    blend_models: [bge_base, gte_modernbert, embeddinggemma_300m, qwen3_emb_06b]
+    blend_alphas: [0.25, 0.5, 0.75]
+    onnx_models: [minilm_l6, bge_small, bge_base, e5_base, arctic_m, granite_r2, mxbai_large]
+    mteb_tasks: [SciFact, NFCorpus, ArguAna, FiQA2018, SCIDOCS, TRECCOVID, Touche2020]
+    leaderboard: [minilm_l6, mpnet, bge_small, bge_base, bge_large, e5_small, e5_base, e5_large, me5_large_inst, gte_base15, gte_modernbert, nomic_v15, nomic_modernbert, arctic_s, arctic_m, arctic_l2, mxbai_large, granite_r2, embeddinggemma_300m, embeddinggemma_2, gte_qwen2_15b, qwen3_emb_06b, qwen3_emb_4b, qwen3_emb_8b, e5_mistral]
+    lb_nanobeir: false
     seeds: [0, 1, 2]
     epochs: 2
     batch_size: 128
@@ -66,6 +102,9 @@ profiles:
     eval_seq_len: 512
     dev_max: 2000
     eval_steps: 50
+    passage_max: 3000
+    nevir_max: null
+    bootstrap: 2000
     nanobeir: [arguana, climatefever, dbpedia, fever, fiqa2018, hotpotqa, msmarco, nfcorpus, nq, quoraretrieval, scidocs, scifact, touche2020]
     repo_suffix: ""
     private: false
@@ -73,12 +112,63 @@ profiles:
     verdict:
       min_trap_gain: 0.05
       max_ndcg_drop: 0.01
+      min_xgen_gain: 0.0
+      private_if_bad: true
+  xl:
+    seed_pool: 150000
+    human_anchor_pool: 3000
+    seeds_per_type: 14000
+    target_per_type: 10000
+    generator: Qwen/Qwen3-32B
+    xgen_generator: microsoft/phi-4
+    xgen_seeds_max: 4000
+    gen_backend: auto
+    gen_batch: 2048
+    nli_model: cross-encoder/nli-deberta-v3-large
+    handcheck: 500
+    retrieval_pairs: 60000
+    guard_pairs: 16000
+    headline_variant: lora_guard
+    gradient_checkpointing: true
+    models: [qwen3_emb_4b, qwen3_emb_8b, gte_qwen2_15b]
+    ablation_models: []
+    scaling_models: []
+    scaling_sizes: []
+    blend_models: []
+    blend_alphas: [0.25, 0.5, 0.75]
+    onnx_models: []
+    mteb_tasks: [SciFact, NFCorpus, ArguAna, FiQA2018, SCIDOCS, TRECCOVID, Touche2020]
+    leaderboard: []
+    lb_nanobeir: false
+    seeds: [0, 1, 2]
+    epochs: 1
+    batch_size: 64
+    mini_batch: 8
+    max_seq_len: 256
+    eval_seq_len: 512
+    dev_max: 2000
+    eval_steps: 100
+    passage_max: 3000
+    nevir_max: null
+    bootstrap: 2000
+    nanobeir: [arguana, climatefever, dbpedia, fever, fiqa2018, hotpotqa, msmarco, nfcorpus, nq, quoraretrieval, scidocs, scifact, touche2020]
+    repo_suffix: ""
+    private: false
+    collect_all: false
+    verdict:
+      min_trap_gain: 0.03
+      max_ndcg_drop: 0.01
+      min_xgen_gain: 0.0
       private_if_bad: true
 
 models:
   minilm_l6:
     id: sentence-transformers/all-MiniLM-L6-v2
     tail: all_MiniLM_L6_v2
+    license: apache-2.0
+  mpnet:
+    id: sentence-transformers/all-mpnet-base-v2
+    tail: all_mpnet_base_v2
     license: apache-2.0
   bge_small:
     id: BAAI/bge-small-en-v1.5
@@ -90,6 +180,18 @@ models:
     tail: bge_base_en_v1.5
     license: mit
     query_prompt: "Represent this sentence for searching relevant passages: "
+  bge_large:
+    id: BAAI/bge-large-en-v1.5
+    tail: bge_large_en_v1.5
+    license: mit
+    query_prompt: "Represent this sentence for searching relevant passages: "
+  e5_small:
+    id: intfloat/e5-small-v2
+    tail: e5_small_v2
+    license: mit
+    query_prompt: "query: "
+    doc_prompt: "passage: "
+    sym_prompt: "query: "
   e5_base:
     id: intfloat/e5-base-v2
     tail: e5_base_v2
@@ -97,15 +199,36 @@ models:
     query_prompt: "query: "
     doc_prompt: "passage: "
     sym_prompt: "query: "
-  arctic_m:
-    id: Snowflake/snowflake-arctic-embed-m-v1.5
-    tail: arctic_embed_m_v1.5
+  e5_large:
+    id: intfloat/e5-large-v2
+    tail: e5_large_v2
+    license: mit
+    query_prompt: "query: "
+    doc_prompt: "passage: "
+    sym_prompt: "query: "
+  me5_large_inst:
+    id: intfloat/multilingual-e5-large-instruct
+    tail: multilingual_e5_large_instruct
+    license: mit
+    query_prompt: "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+    sym_prompt: "Instruct: Retrieve semantically similar text.\nQuery: "
+  gte_base15:
+    id: Alibaba-NLP/gte-base-en-v1.5
+    tail: gte_base_en_v1.5
     license: apache-2.0
-    query_prompt: "Represent this sentence for searching relevant passages: "
+    trust_remote_code: true
   gte_modernbert:
     id: Alibaba-NLP/gte-modernbert-base
     tail: gte_modernbert_base
     license: apache-2.0
+  nomic_v15:
+    id: nomic-ai/nomic-embed-text-v1.5
+    tail: nomic_embed_text_v1.5
+    license: apache-2.0
+    trust_remote_code: true
+    query_prompt: "search_query: "
+    doc_prompt: "search_document: "
+    sym_prompt: "clustering: "
   nomic_modernbert:
     id: nomic-ai/modernbert-embed-base
     tail: modernbert_embed_base
@@ -113,6 +236,21 @@ models:
     query_prompt: "search_query: "
     doc_prompt: "search_document: "
     sym_prompt: "clustering: "
+  arctic_s:
+    id: Snowflake/snowflake-arctic-embed-s
+    tail: arctic_embed_s
+    license: apache-2.0
+    query_prompt: "Represent this sentence for searching relevant passages: "
+  arctic_m:
+    id: Snowflake/snowflake-arctic-embed-m-v1.5
+    tail: arctic_embed_m_v1.5
+    license: apache-2.0
+    query_prompt: "Represent this sentence for searching relevant passages: "
+  arctic_l2:
+    id: Snowflake/snowflake-arctic-embed-l-v2.0
+    tail: arctic_embed_l_v2.0
+    license: apache-2.0
+    query_prompt: "query: "
   granite_r2:
     id: ibm-granite/granite-embedding-english-r2
     tail: granite_embedding_english_r2
@@ -143,6 +281,14 @@ models:
     tail: mxbai_embed_large_v1
     license: apache-2.0
     query_prompt: "Represent this sentence for searching relevant passages: "
+  gte_qwen2_15b:
+    id: Alibaba-NLP/gte-Qwen2-1.5B-instruct
+    tail: gte_Qwen2_1.5B_instruct
+    license: apache-2.0
+    trust_remote_code: true
+    lr: 1.0e-5
+    query_prompt: "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+    sym_prompt: "Instruct: Retrieve semantically similar text.\nQuery: "
   qwen3_emb_06b:
     id: Qwen/Qwen3-Embedding-0.6B
     tail: Qwen3_Embedding_0.6B
@@ -150,14 +296,38 @@ models:
     lr: 1.0e-5
     query_prompt: "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:"
     sym_prompt: "Instruct: Retrieve semantically similar text\nQuery:"
+  qwen3_emb_4b:
+    id: Qwen/Qwen3-Embedding-4B
+    tail: Qwen3_Embedding_4B
+    license: apache-2.0
+    lr: 1.0e-5
+    query_prompt: "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:"
+    sym_prompt: "Instruct: Retrieve semantically similar text\nQuery:"
+  qwen3_emb_8b:
+    id: Qwen/Qwen3-Embedding-8B
+    tail: Qwen3_Embedding_8B
+    license: apache-2.0
+    lr: 1.0e-5
+    query_prompt: "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:"
+    sym_prompt: "Instruct: Retrieve semantically similar text\nQuery:"
+  e5_mistral:
+    id: intfloat/e5-mistral-7b-instruct
+    tail: e5_mistral_7b_instruct
+    license: mit
+    query_prompt: "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+    sym_prompt: "Instruct: Retrieve semantically similar text.\nQuery: "
 
 variants:
   full_guard: {lora: false, guard: true}
   full_noguard: {lora: false, guard: false}
   lora_guard: {lora: true, guard: true}
   lora_noguard: {lora: true, guard: false}
+  mined_guard: {lora: false, guard: true, mined: true}
 
 headline_variant: full_guard
+
+tracking:
+  default: [tensorboard, mlflow]
 
 train:
   lr_full: 2.0e-5
@@ -168,7 +338,9 @@ train:
   guard_weight: 1.0
   warmup_ratio: 0.1
   weight_decay: 0.01
-  matryoshka_dims: [1024, 768, 512, 256, 128, 64]
+  mine_margin: 0.05
+  mine_easy_frac: 0.3
+  matryoshka_dims: [4096, 2560, 1024, 768, 512, 256, 128, 64]
 
 filter:
   entail_min: 0.7
