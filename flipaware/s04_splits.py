@@ -2,17 +2,13 @@ import csv
 import math
 import random
 
-from flipaware.common import load_cfg, log, read_jsonl, write_jsonl
+from flipaware.common import SPLIT, load_cfg, log, read_jsonl, write_jsonl
 
 COLS = ("id", "type", "seed_id", "anchor", "paraphrase", "trap")
 
 
-def main():
-    cfg = load_cfg()
-    data, res = cfg["paths"]["data"], cfg["paths"]["results"]
-    if (data / "test.jsonl").exists():
-        log("skip splits")
-        return
+def build_splits(cfg):
+    data = cfg["paths"]["data"]
     rows = read_jsonl(data / "filtered.jsonl")
     if not rows:
         raise SystemExit("filtered.jsonl is empty")
@@ -26,6 +22,10 @@ def main():
         sub = [{k: r[k] for k in COLS} for r in rows if part[r["seed_id"]] == split]
         write_jsonl(data / f"{split}.jsonl", sub)
         log(f"{split}: {len(sub)}")
+
+
+def build_handcheck(cfg):
+    rows = read_jsonl(cfg["paths"]["data"] / "filtered.jsonl")
     n = cfg["run"]["handcheck"]
     types = sorted({r["type"] for r in rows})
     per = math.ceil(n / len(types))
@@ -34,13 +34,55 @@ def main():
     for ty in types:
         pool = [r for r in rows if r["type"] == ty]
         picked += rng.sample(pool, min(per, len(pool)))
-    path = res / "handcheck.csv"
+    path = cfg["paths"]["results"] / "handcheck.csv"
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["id", "type", "anchor", "paraphrase", "trap", "paraphrase_ok", "trap_ok"])
         for r in picked[:n]:
             w.writerow([r["id"], r["type"], r["anchor"], r["paraphrase"], r["trap"], "", ""])
     log(f"hand check sheet: {path}")
+
+
+def build_passages(cfg):
+    data = cfg["paths"]["data"]
+    ctx = {s["seed_id"]: s.get("context") for s in read_jsonl(data / "seeds.jsonl")}
+    items = []
+    for r in read_jsonl(data / "test.jsonl"):
+        c = ctx.get(r["seed_id"])
+        if not c or r["anchor"] not in c or len(SPLIT.split(c)) < 2:
+            continue
+        items.append(
+            {
+                "id": r["id"],
+                "type": r["type"],
+                "query": r["paraphrase"],
+                "original": c,
+                "twin": c.replace(r["anchor"], r["trap"], 1),
+                "anchor": r["anchor"],
+                "trap": r["trap"],
+            }
+        )
+    random.Random(41).shuffle(items)
+    cap = cfg["run"].get("passage_max")
+    if cap:
+        items = items[:cap]
+    write_jsonl(data / "passage_test.jsonl", items)
+    log(f"passage test items: {len(items)}")
+
+
+def main():
+    cfg = load_cfg()
+    data, res = cfg["paths"]["data"], cfg["paths"]["results"]
+    jobs = [
+        (data / "test.jsonl", build_splits),
+        (res / "handcheck.csv", build_handcheck),
+        (data / "passage_test.jsonl", build_passages),
+    ]
+    for path, fn in jobs:
+        if path.exists():
+            log(f"skip {path.name}")
+            continue
+        fn(cfg)
 
 
 if __name__ == "__main__":
