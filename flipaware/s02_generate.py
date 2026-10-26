@@ -1,3 +1,4 @@
+import argparse
 import json
 import random
 import re
@@ -39,22 +40,30 @@ def parse(text):
     return None
 
 
-def build_jobs(cfg):
-    run = cfg["run"]
-    seeds = read_jsonl(cfg["paths"]["data"] / "seeds.jsonl")
-    rng = random.Random(7)
-    k = run["seeds_per_type"]
+def pick(pool, ty, k, rng):
+    if ty == "numbers":
+        num = [s for s in pool if s["has_number"]]
+        rest = [s for s in pool if not s["has_number"]]
+        rng.shuffle(num)
+        rng.shuffle(rest)
+        return (num + rest)[:k]
+    return rng.sample(pool, min(k, len(pool)))
+
+
+def build_jobs(cfg, which):
+    run, data = cfg["run"], cfg["paths"]["data"]
+    seeds = read_jsonl(data / "seeds.jsonl")
+    if which == "xgen":
+        test_ids = {r["seed_id"] for r in read_jsonl(data / "test.jsonl")}
+        pool = [s for s in seeds if s["seed_id"] in test_ids]
+        random.Random(11).shuffle(pool)
+        pool = pool[: run["xgen_seeds_max"]]
+        k, rng = len(pool), random.Random(11)
+    else:
+        pool, k, rng = seeds, run["seeds_per_type"], random.Random(7)
     jobs = []
     for ty, rule in cfg["trap_types"].items():
-        if ty == "numbers":
-            num = [s for s in seeds if s["has_number"]]
-            rest = [s for s in seeds if not s["has_number"]]
-            rng.shuffle(num)
-            rng.shuffle(rest)
-            picked = (num + rest)[:k]
-        else:
-            picked = rng.sample(seeds, min(k, len(seeds)))
-        for s in picked:
+        for s in pick(pool, ty, k, rng):
             jobs.append({"id": f"{ty}:{s['seed_id']}", "type": ty, "seed_id": s["seed_id"], "anchor": s["text"], "rule": rule})
     return jobs
 
@@ -90,7 +99,7 @@ class HFGen:
         self.tok = AutoTokenizer.from_pretrained(name, padding_side="left")
         if self.tok.pad_token is None:
             self.tok.pad_token = self.tok.eos_token
-        dtype = torch.bfloat16 if gpu_info()["bf16"] else torch.float32
+        dtype = torch.bfloat16 if gpu_info()["bf16"] else torch.float16
         self.model = AutoModelForCausalLM.from_pretrained(name, torch_dtype=dtype, device_map="cuda").eval()
 
     def __call__(self, texts, max_new, temp):
@@ -120,33 +129,42 @@ class VGen:
         return [o.outputs[0].text for o in outs]
 
 
-def main():
-    cfg = load_cfg()
+def chat_text(tok, msgs):
+    try:
+        return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+    except TypeError:
+        return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+
+
+def generate(cfg, which):
     run = cfg["run"]
-    raw = cfg["paths"]["data"] / "raw.jsonl"
+    raw = cfg["paths"]["data"] / ("raw.jsonl" if which == "main" else "raw_xgen.jsonl")
+    name = run["generator"] if which == "main" else run["xgen_generator"]
     done = {r["id"] for r in read_jsonl(raw)}
-    jobs = [j for j in build_jobs(cfg) if j["id"] not in done]
+    jobs = [j for j in build_jobs(cfg, which) if j["id"] not in done]
     if not jobs:
-        log("generation complete")
+        log(f"generation complete ({which})")
         return
     backend = pick_backend(run)
-    log(f"generating {len(jobs)} items with {run['generator']} on {backend}")
-    gen = VGen(run["generator"]) if backend == "vllm" else HFGen(run["generator"])
+    log(f"generating {len(jobs)} items with {name} on {backend} ({which})")
+    gen = VGen(name) if backend == "vllm" else HFGen(name)
     chunk = run["gen_batch"]
     for i in range(0, len(jobs), chunk):
         part = jobs[i : i + chunk]
-        texts = [
-            gen.tok.apply_chat_template(messages(j), tokenize=False, add_generation_prompt=True, enable_thinking=False)
-            for j in part
-        ]
-        outs = gen(texts, 200, 0.7)
+        outs = gen([chat_text(gen.tok, messages(j)) for j in part], 200, 0.7)
         recs = []
         for j, o in zip(part, outs):
             parsed = parse(o) or {"error": True}
-            recs.append({"id": j["id"], "type": j["type"], "seed_id": j["seed_id"], "anchor": j["anchor"], **parsed})
+            recs.append({"id": j["id"], "type": j["type"], "seed_id": j["seed_id"], "anchor": j["anchor"], "generator": name, **parsed})
         append_jsonl(raw, recs)
         ok = sum("paraphrase" in r for r in recs)
         log(f"{min(i + chunk, len(jobs))}/{len(jobs)} done, {ok}/{len(recs)} usable in this chunk")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--set", default="main", choices=["main", "xgen"])
+    generate(load_cfg(), ap.parse_args().set)
 
 
 if __name__ == "__main__":
