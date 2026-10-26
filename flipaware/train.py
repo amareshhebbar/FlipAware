@@ -1,23 +1,22 @@
-import argparse
 import dataclasses
 import os
+import random
 import shutil
-import subprocess
 import sys
 import time
 
 import torch
 from sentence_transformers.evaluation import SentenceEvaluator
 
+from flipaware import tracking
 from flipaware.common import (
-    REPO,
+    emb_dim,
     encode,
     gpu_info,
     load_cfg,
     load_st,
     log,
     mrl_dims,
-    plan_runs,
     prompts,
     read_jsonl,
     run_dir,
@@ -101,11 +100,30 @@ def run_one(cfg, mkey, vname, seed):
     model = load_st(mcfg)
     set_seq(model, run["max_seq_len"])
     q, d, s = prompts(mcfg)
-    dims = mrl_dims(cfg, model.get_sentence_embedding_dimension())
+    dims = mrl_dims(cfg, emb_dim(model))
 
     train_rows = read_jsonl(data / "train.jsonl")
     dev_rows = read_jsonl(data / "dev.jsonl")[: run["dev_max"]]
     ret_rows = read_jsonl(data / "retrieval.jsonl")
+    mined_info = None
+    if var.get("limit"):
+        order = list(range(len(train_rows)))
+        random.Random(1234).shuffle(order)
+        train_rows = [train_rows[i] for i in order[: var["limit"]]]
+        log(f"training on {len(train_rows)} trap triples")
+    if var.get("mined"):
+        model.eval()
+        r = trap_eval(model, train_rows, s)
+        margins = r["dims"][str(r["full"])]["margins"]
+        hard = [x for x, mg in zip(train_rows, margins) if mg < tr["mine_margin"]]
+        easy = [x for x, mg in zip(train_rows, margins) if mg >= tr["mine_margin"]]
+        rng = random.Random(seed)
+        easy = rng.sample(easy, int(len(easy) * tr["mine_easy_frac"]))
+        if len(hard) + len(easy) >= run["batch_size"]:
+            train_rows = hard + easy
+        rng.shuffle(train_rows)
+        mined_info = {"hard": len(hard), "easy_kept": len(easy)}
+        log(f"mined: {len(hard)} hard triples, {len(easy)} easy kept")
 
     sets = {
         "trap": Dataset.from_dict(
@@ -140,7 +158,6 @@ def run_one(cfg, mkey, vname, seed):
         loss["guard"] = gl if tr["guard_weight"] == 1 else Weighted(gl, tr["guard_weight"])
         pr["guard"] = {"sentence1": s, "sentence2": s}
 
-    attr = None
     if var["lora"]:
         from peft import LoraConfig, get_peft_model
 
@@ -152,13 +169,24 @@ def run_one(cfg, mkey, vname, seed):
             target_modules="all-linear",
             bias="none",
         )
-        setattr(mod, attr, get_peft_model(getattr(mod, attr), pcfg))
+        peft_model = get_peft_model(getattr(mod, attr), pcfg)
+        try:
+            setattr(mod, attr, peft_model)
+        except AttributeError:
+            pass
+        if run.get("gradient_checkpointing"):
+            peft_model.enable_input_require_grads()
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        log(f"LoRA trainable parameters: {trainable}")
 
     bs = run["batch_size"]
     steps = max(1, sum(len(ds) // bs for ds in sets.values()) * run["epochs"])
     lr = tr["lr_lora"] if var["lora"] else mcfg.get("lr", tr["lr_full"])
     os.environ["TENSORBOARD_LOGGING_DIR"] = str(out / "tb")
-    fields = {f.name for f in dataclasses.fields(SentenceTransformerTrainingArguments)}
+    tags = {"model": mkey, "base_id": mcfg["id"], "variant": vname, "seed": str(seed), "lora": str(var["lora"]), "guard": str(var["guard"]), "profile": cfg["profile"]}
+    report_to, callbacks = tracking.setup_train(cfg, out.name, tags)
+    log(f"tracking: {', '.join(report_to + (['aim'] if callbacks else []))}")
+    fields ={f.name for f in dataclasses.fields(SentenceTransformerTrainingArguments)}
     kw = dict(
         output_dir=str(out / "ckpt"),
         num_train_epochs=run["epochs"],
@@ -177,13 +205,14 @@ def run_one(cfg, mkey, vname, seed):
         save_total_limit=1,
         logging_steps=max(5, run["eval_steps"] // 4),
         logging_dir=str(out / "tb"),
-        report_to=["tensorboard"],
+        report_to=report_to,
         seed=seed,
         data_seed=seed,
         prompts=clean_prompts(pr),
         dataloader_num_workers=2,
         run_name=out.name,
         disable_tqdm=cfg["platform"] == "runpod",
+        gradient_checkpointing=bool(run.get("gradient_checkpointing")),
     )
     if "eval_strategy" not in fields:
         kw["evaluation_strategy"] = kw.pop("eval_strategy")
@@ -191,7 +220,7 @@ def run_one(cfg, mkey, vname, seed):
 
     t0 = time.time()
     trainer = SentenceTransformerTrainer(
-        model=model, args=args, train_dataset=sets, loss=loss, evaluator=TrapEval(dev_rows, s)
+        model=model, args=args, train_dataset=sets, loss=loss, evaluator=TrapEval(dev_rows, s), callbacks=callbacks or None
     )
     last = None if var["lora"] else latest_ckpt(out / "ckpt")
     if last:
@@ -199,10 +228,14 @@ def run_one(cfg, mkey, vname, seed):
     trainer.train(resume_from_checkpoint=str(last) if last else None)
 
     if var["lora"]:
-        mod, attr = lora_attr(model)
-        setattr(mod, attr, getattr(mod, attr).merge_and_unload())
+        merged = peft_model.merge_and_unload()
+        try:
+            setattr(mod, attr, merged)
+        except AttributeError:
+            pass
     model.save(str(out / "model"))
     write_json(out / "train_log.json", trainer.state.log_history)
+    tracking.finish_train(cfg, out.name, tags, trainer.state.log_history, callbacks)
     write_json(
         out / "done.json",
         {
@@ -223,6 +256,8 @@ def run_one(cfg, mkey, vname, seed):
             "lora": var["lora"],
             "guard": var["guard"],
             "rows": {k: len(v) for k, v in sets.items()},
+            "limit": var.get("limit"),
+            "mined": mined_info,
         },
     )
     shutil.rmtree(out / "ckpt", ignore_errors=True)
@@ -230,28 +265,8 @@ def run_one(cfg, mkey, vname, seed):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--one", nargs=3)
-    a = ap.parse_args()
     cfg = load_cfg()
-    if a.one:
-        run_one(cfg, a.one[0], a.one[1], int(a.one[2]))
-        return
-    fails = []
-    plan = plan_runs(cfg)
-    for i, (m, v, s) in enumerate(plan, 1):
-        if (run_dir(cfg, m, v, s) / "done.json").exists():
-            log(f"[{i}/{len(plan)}] skip {m} {v} s{s}")
-            continue
-        log(f"[{i}/{len(plan)}] start {m} {v} s{s}")
-        rc = subprocess.run(
-            [sys.executable, "-m", "flipaware.s05_train", "--one", m, v, str(s)], cwd=str(REPO)
-        ).returncode
-        if rc != 0:
-            fails.append({"model": m, "variant": v, "seed": s, "returncode": rc})
-            log(f"failed {m} {v} s{s} with code {rc}")
-    write_json(cfg["paths"]["results"] / "train_failures.json", fails)
-    log(f"training finished, {len(fails)} failed")
+    run_one(cfg, sys.argv[1], sys.argv[2], int(sys.argv[3]))
 
 
 if __name__ == "__main__":
