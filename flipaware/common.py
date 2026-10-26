@@ -1,6 +1,9 @@
 import json
 import os
 import random
+import re
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -8,6 +11,10 @@ import yaml
 
 PKG = Path(__file__).resolve().parent
 REPO = PKG.parent
+SPLIT = re.compile(r"(?<=[.!?])\s+")
+WORD = re.compile(r"[a-z0-9']+")
+TRAP_SETS = {"trap": "test.jsonl", "trap_xgen": "xgen_test.jsonl", "trap_human": "human_test.jsonl"}
+LISTS = ("ablation_models", "scaling_models", "blend_models", "onnx_models")
 
 
 def log(*parts):
@@ -43,6 +50,11 @@ def detect_work(platform, profile):
     return base / profile
 
 
+def env_list(name):
+    v = os.environ.get(name)
+    return [k.strip() for k in v.split(",") if k.strip()] if v else None
+
+
 def load_cfg():
     cfg = yaml.safe_load((PKG / "config.yaml").read_text())
     platform = detect_platform()
@@ -50,13 +62,23 @@ def load_cfg():
     if profile not in cfg["profiles"]:
         raise SystemExit(f"unknown profile {profile}")
     run = dict(cfg["profiles"][profile])
-    if os.environ.get("FLIP_MODELS"):
-        keys = [k.strip() for k in os.environ["FLIP_MODELS"].split(",") if k.strip()]
-        bad = [k for k in keys if k not in cfg["models"]]
-        if bad:
-            raise SystemExit(f"unknown models in FLIP_MODELS: {bad}; choose from {list(cfg['models'])}")
+    keys = env_list("FLIP_MODELS")
+    if keys:
         run["models"] = keys
-        run["ablation_models"] = [k for k in (run.get("ablation_models") or []) if k in keys]
+        for k in LISTS:
+            run[k] = [m for m in (run.get(k) or []) if m in keys]
+    lb = env_list("FLIP_LEADERBOARD")
+    if lb is not None:
+        run["leaderboard"] = lb
+    bad = [m for m in run["models"] + (run.get("leaderboard") or []) if m not in cfg["models"]]
+    if bad:
+        raise SystemExit(f"unknown model keys {bad}; choose from {list(cfg['models'])}")
+    head = run.get("headline_variant", cfg["headline_variant"])
+    cfg["headline_variant"] = head
+    variants = dict(cfg["variants"])
+    for n in run.get("scaling_sizes") or []:
+        variants[f"n{n}"] = {**variants[head], "limit": int(n), "scale": True}
+    cfg["variants"] = variants
     work = detect_work(platform, profile)
     paths = {"work": work}
     for name in ("data", "runs", "results", "assets", "publish"):
@@ -78,9 +100,6 @@ def hf_token():
 
 
 def run_module(mod, *args):
-    import subprocess
-    import sys
-
     return subprocess.run([sys.executable, "-m", mod, *[str(a) for a in args]], cwd=str(REPO)).returncode
 
 
@@ -133,6 +152,15 @@ def append_jsonl(path, rows):
         os.fsync(f.fileno())
 
 
+def words(s):
+    return set(WORD.findall(s.lower()))
+
+
+def jaccard(a, b):
+    x, y = words(a), words(b)
+    return len(x & y) / max(1, len(x | y))
+
+
 def gpu_info():
     import torch
 
@@ -169,6 +197,11 @@ def prompts(mcfg):
     return mcfg.get("query_prompt") or "", mcfg.get("doc_prompt") or "", mcfg.get("sym_prompt") or ""
 
 
+def emb_dim(model):
+    fn = getattr(model, "get_embedding_dimension", None) or model.get_sentence_embedding_dimension
+    return fn()
+
+
 def mrl_dims(cfg, full):
     return sorted({d for d in cfg["train"]["matryoshka_dims"] if d < full} | {full}, reverse=True)
 
@@ -181,13 +214,13 @@ def set_seq(model, n):
     model.max_seq_length = min(n, lim)
 
 
-def load_st(mcfg, path=None, dtype=None):
+def load_st(mcfg, path=None, dtype=None, device=None):
     import torch
     from sentence_transformers import SentenceTransformer
 
     kw = {
         "trust_remote_code": bool(mcfg.get("trust_remote_code", False)),
-        "device": "cuda" if torch.cuda.is_available() else "cpu",
+        "device": device or ("cuda" if torch.cuda.is_available() else "cpu"),
     }
     if dtype is not None:
         kw["model_kwargs"] = {"torch_dtype": dtype}
@@ -203,7 +236,25 @@ def encode(model, texts, prompt, batch_size=64):
     return model.encode(texts, **kw).float()
 
 
-def trap_eval(model, rows, prompt, dims=None):
+def quant_acc(a, p, t):
+    import torch
+
+    allv = torch.cat([a, p, t])
+    lo = allv.min(0).values
+    hi = allv.max(0).values
+    step = (hi - lo).clamp_min(1e-8) / 255
+
+    def q8(x):
+        return (((x - lo) / step).round() - 128).clamp(-128, 127)
+
+    qa, qp, qt = q8(a), q8(p), q8(t)
+    int8 = ((qa * qp).sum(-1) > (qa * qt).sum(-1)).float().mean().item()
+    ba, bp, bt = a > 0, p > 0, t > 0
+    binary = ((ba == bp).sum(-1) > (ba == bt).sum(-1)).float().mean().item()
+    return {"int8": int8, "binary": binary}
+
+
+def trap_eval(model, rows, prompt, dims=None, quant=False):
     import torch.nn.functional as F
 
     a = encode(model, [r["anchor"] for r in rows], prompt)
@@ -227,7 +278,46 @@ def trap_eval(model, rows, prompt, dims=None):
             rec["correct"] = ok
             rec["margins"] = margins
         out[str(d)] = rec
-    return {"full": full, "dims": out}
+    res = {"full": full, "n": len(rows), "dims": out}
+    if quant:
+        res["quant"] = quant_acc(a, p, t)
+    return res
+
+
+def passage_eval(model, items, qp, dp):
+    import torch
+    import torch.nn.functional as F
+
+    n = len(items)
+    q = F.normalize(encode(model, [x["query"] for x in items], qp, 32), dim=-1)
+    docs = [x["original"] for x in items] + [x["twin"] for x in items]
+    d = F.normalize(encode(model, docs, dp, 32), dim=-1)
+    sims = q @ d.T
+    idx = torch.arange(n, device=sims.device)
+    pair = (sims[idx, idx] > sims[idx, idx + n]).float()
+    rank = (sims > sims[idx, idx].unsqueeze(1)).sum(1).float()
+    by = {}
+    for ty in sorted({x["type"] for x in items}):
+        sel = [i for i, x in enumerate(items) if x["type"] == ty]
+        by[ty] = pair[sel].mean().item()
+    return {
+        "n": n,
+        "pair_acc": pair.mean().item(),
+        "recall1": (rank == 0).float().mean().item(),
+        "mrr": (1.0 / (rank + 1)).mean().item(),
+        "by_type": by,
+    }
+
+
+def nevir_eval(model, rows, qp, dp):
+    import torch.nn.functional as F
+
+    q1 = F.normalize(encode(model, [r["q1"] for r in rows], qp, 32), dim=-1)
+    q2 = F.normalize(encode(model, [r["q2"] for r in rows], qp, 32), dim=-1)
+    d1 = F.normalize(encode(model, [r["doc1"] for r in rows], dp, 32), dim=-1)
+    d2 = F.normalize(encode(model, [r["doc2"] for r in rows], dp, 32), dim=-1)
+    a = ((q1 * d1).sum(-1) > (q1 * d2).sum(-1)) & ((q2 * d2).sum(-1) > (q2 * d1).sum(-1))
+    return {"n": len(rows), "pair_acc": a.float().mean().item()}
 
 
 def seed_all(seed):
@@ -247,9 +337,12 @@ def run_dir(cfg, mkey, vname, seed):
 def runs_for(cfg, m):
     run = cfg["run"]
     head = cfg["headline_variant"]
+    s0 = run["seeds"][0]
     plan = [(head, s) for s in run["seeds"]]
     if m in (run.get("ablation_models") or []):
-        plan += [(v, run["seeds"][0]) for v in cfg["variants"] if v != head]
+        plan += [(v, s0) for v, x in cfg["variants"].items() if v != head and not x.get("scale")]
+    if m in (run.get("scaling_models") or []):
+        plan += [(v, s0) for v, x in cfg["variants"].items() if x.get("scale")]
     return plan
 
 
@@ -265,8 +358,16 @@ def dev_acc(cfg, m, v, s):
     return vals[-1] if vals else None
 
 
-def best_seed(cfg, m, seeds):
+def done_seeds(cfg, m):
     head = cfg["headline_variant"]
+    return [s for s in cfg["run"]["seeds"] if (run_dir(cfg, m, head, s) / "done.json").exists()]
+
+
+def best_seed(cfg, m, seeds=None):
+    head = cfg["headline_variant"]
+    seeds = seeds if seeds is not None else done_seeds(cfg, m)
+    if not seeds:
+        return None
     return max((dev_acc(cfg, m, head, s) or 0.0, s) for s in seeds)[1]
 
 
@@ -278,5 +379,12 @@ def dataset_name(cfg):
     return f"{cfg['project']['name']}_Triples{cfg['run']['repo_suffix']}"
 
 
+def space_name(cfg, kind):
+    return f"{cfg['project']['name']}_{kind}{cfg['run']['repo_suffix']}"
+
+
 if __name__ == "__main__":
-    print(detect_platform())
+    if len(sys.argv) > 1 and sys.argv[1] == "workdir":
+        print(load_cfg()["paths"]["work"])
+    else:
+        print(detect_platform())
