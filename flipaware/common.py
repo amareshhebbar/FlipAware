@@ -383,6 +383,80 @@ def space_name(cfg, kind):
     return f"{cfg['project']['name']}_{kind}{cfg['run']['repo_suffix']}"
 
 
+def edit_check(anchor, para, trap, flt):
+    a, p, t = (" ".join(x.lower().split()) for x in (anchor, para, trap))
+    if len({a, p, t}) < 3:
+        return "duplicate"
+    aw, tw = set(WORD.findall(a)), set(WORD.findall(t))
+    if not aw or not tw:
+        return "duplicate"
+    keep = len(aw & tw) / len(aw)
+    added = len(tw - aw)
+    if keep < flt["trap_keep_min"] or added > max(flt["trap_add_max"], int(0.3 * len(aw))):
+        return "trap_low_overlap"
+    return None
+
+
+def file_sig(path):
+    path = Path(path)
+    if not path.exists():
+        return None
+    n = 0
+    with path.open("rb") as f:
+        for _ in f:
+            n += 1
+    return f"{path.stat().st_size}:{n}"
+
+
+def text_sig(*parts):
+    import hashlib
+
+    return hashlib.sha1(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def stamp_path(cfg, name):
+    return cfg["paths"]["data"] / f".stamp_{name}.json"
+
+
+def stamp_ok(cfg, name, value):
+    p = stamp_path(cfg, name)
+    return p.exists() and read_json(p).get("sig") == value
+
+
+def write_stamp(cfg, name, value):
+    write_json(stamp_path(cfg, name), {"sig": value, "ts": time.time()})
+
+
+RESET = {
+    2: ["data/raw.jsonl", "data/.stamp_gen_main.json"],
+    3: ["data/filtered.jsonl", "data/candidates.jsonl", "results/filter_stats.json", "data/.stamp_filter_main.json"],
+    4: ["data/train.jsonl", "data/dev.jsonl", "data/test.jsonl", "data/passage_test.jsonl", "results/handcheck.csv", "data/.stamp_splits.json"],
+    5: ["data/raw_xgen.jsonl", "data/.stamp_gen_xgen.json"],
+    6: ["data/xgen_test.jsonl", "data/candidates_xgen.jsonl", "results/filter_stats_xgen.json", "data/.stamp_filter_xgen.json"],
+    8: ["runs/*", "results/base_*.json", "results/run_*.json", "results/model_*.json", "results/blend_*.json", "results/onnx_*.json", "results/mteb_*.json", "results/collection.json"],
+    11: ["results/summary.*", "results/leaderboard.*", "results/REPORT.md", "assets/*"],
+}
+
+
+def reset_from(cfg, n):
+    import shutil
+
+    work = cfg["paths"]["work"]
+    gone = []
+    for stage, pats in RESET.items():
+        if stage < n:
+            continue
+        for pat in pats:
+            for p in work.glob(pat):
+                if p.is_dir():
+                    shutil.rmtree(p)
+                else:
+                    p.unlink()
+                gone.append(str(p.relative_to(work)))
+    log(f"reset from stage {n}: removed {len(gone)} items")
+    return gone
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "workdir":
         print(load_cfg()["paths"]["work"])

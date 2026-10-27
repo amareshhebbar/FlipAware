@@ -31,11 +31,12 @@ profiles:
     human_anchor_pool: 300
     seeds_per_type: 40
     target_per_type: null
-    generator: Qwen/Qwen3-1.7B
+    generator: Qwen/Qwen3-4B-Instruct-2507
     xgen_generator: microsoft/Phi-4-mini-instruct
     xgen_seeds_max: 60
     gen_backend: transformers
-    gen_batch: 32
+    gen_batch: 8
+    gen_samples: 4
     nli_model: cross-encoder/nli-deberta-v3-base
     handcheck: 40
     retrieval_pairs: 2000
@@ -80,6 +81,7 @@ profiles:
     xgen_seeds_max: 2000
     gen_backend: auto
     gen_batch: 2048
+    gen_samples: 3
     nli_model: cross-encoder/nli-deberta-v3-large
     handcheck: 500
     retrieval_pairs: 20000
@@ -124,6 +126,7 @@ profiles:
     xgen_seeds_max: 4000
     gen_backend: auto
     gen_batch: 2048
+    gen_samples: 3
     nli_model: cross-encoder/nli-deberta-v3-large
     handcheck: 500
     retrieval_pairs: 60000
@@ -345,4 +348,7 @@ train:
 filter:
   entail_min: 0.7
   equiv_max: 0.5
+  trap_keep_min: 0.7
+  trap_add_max: 4
   trap_overlap_min: 0.5
+  min_keep_rate: 0.05
