@@ -62,6 +62,20 @@ A model is GOOD when trap accuracy rises by at least `min_trap_gain`, NanoBEIR n
 
 Override with `FLIP_PROFILE`. Pick models with `FLIP_MODELS=bge_small,embeddinggemma_300m`.
 
+## Notebook
+
+`notebooks/flipaware_pipeline.ipynb` runs on Colab and on RunPod Jupyter. It detects the platform, picks the profile, and runs one stage per cell with checks after each. On RunPod it can also start the whole run in the background.
+
+Open on Colab: https://colab.research.google.com/github/amareshhebbar/flipaware/blob/main/notebooks/flipaware_pipeline.ipynb
+
+## Reruns
+
+Stages rerun by themselves when their inputs change: new generator settings move old generations aside, new generations refilter, new filtered data rebuilds the splits and clears later outputs. To redo work on purpose:
+
+```bash
+python -m flipaware.reset 2 --yes
+```
+
 ## Colab
 
 ```python
