@@ -4,6 +4,7 @@ Embedding models fine tuned to tell apart sentences that look alike but mean dif
 
 Google Colab [LINK](https://colab.research.google.com/drive/1nv-rDvUbCsYr60k6zJ_0cRRgV1ZXKeVo?usp=sharing) or Github [LINK](https://github.com/amareshhebbar/FlipAware/blob/main/notebooks/flipaware_pipeline.ipynb)
 
+For Huggingface [LINK](https://huggingface.co/collections/AmareshHebbar/flipaware-embeddings)
 ## What the pipeline produces
 
 | Output | Where |
