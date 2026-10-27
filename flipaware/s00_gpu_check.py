@@ -49,7 +49,7 @@ def hf_checks(cfg):
         out["hf_error"] = repr(ex)
         return out
     gated = {}
-    for m in cfg["run"]["models"]:
+    for m in dict.fromkeys(cfg["run"]["models"] + (cfg["run"].get("leaderboard") or [])):
         mcfg = cfg["models"][m]
         if not mcfg.get("gated"):
             continue
@@ -87,7 +87,13 @@ def main():
         log("no HuggingFace login found; gated downloads and publishing will fail")
         if os.environ.get("FLIP_PUBLISH", "1") == "1":
             sys.exit(1)
-    log(f"models this run: {', '.join(cfg['run']['models'])}")
+    log(f"models to train: {', '.join(cfg['run']['models'])}")
+    log(f"leaderboard models: {len(cfg['run'].get('leaderboard') or [])}")
+    from flipaware import tracking
+
+    log(f"trackers: {', '.join(tracking.enabled(cfg)) or 'none'} (logs saved under {tracking.tdir(cfg)})")
+    for k in ("ablation_models", "scaling_models", "blend_models"):
+        log(f"{k}: {', '.join(cfg['run'].get(k) or []) or 'none'}")
     log("gpu check passed")
 
 
