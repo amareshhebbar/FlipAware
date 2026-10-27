@@ -2,7 +2,7 @@
 
 Embedding models fine tuned to tell apart sentences that look alike but mean different things: negation, numbers, swapped roles, time order, quantifiers, hedges, swapped entities, and scope. Every release is a drop in replacement for its base model, checked on four independent test sets, and reported next to general retrieval.
 
-Google Colab [LINK](https://colab.research.google.com/drive/1nv-rDvUbCsYr60k6zJ_0cRRgV1ZXKeVo?usp=sharing)
+Google Colab [LINK](https://colab.research.google.com/drive/1nv-rDvUbCsYr60k6zJ_0cRRgV1ZXKeVo?usp=sharing) or This [LINK](https://github.com/amareshhebbar/FlipAware/blob/main/notebooks/flipaware_pipeline.ipynb)
 
 ## What the pipeline produces
 
