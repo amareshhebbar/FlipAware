@@ -335,9 +335,9 @@ def dataset_card(cfg, ctx, counts, extras=None):
         "| Step | What happens |",
         "|---|---|",
         "| 1. Seeds | Real English sentences of 8 to 30 words from GooAQ answers and AllNLI premises, deduplicated and tagged when they contain a number |",
-        f"| 2. Generate | {run['generator']} runs locally with thinking off and writes one paraphrase and one trap per seed and trap type, or skips when the rule cannot apply |",
+        f"| 2. Generate | {run['generator']} runs locally with thinking off, sees one worked example per trap type, writes {run.get('gen_samples', 3)} candidates per seed and trap type, and keeps the first that passes the edit check |",
         f"| 3. Filter | {run['nli_model']} scores entailment both ways. Kept only when the paraphrase entails the anchor both ways (at least {flt['entail_min']}), "
-        f"the trap does not (below {flt['equiv_max']}), and the trap shares at least {int(flt['trap_overlap_min'] * 100)}% of its words with the anchor |",
+        f"the trap does not (below {flt['equiv_max']}), and the trap keeps at least {int(flt['trap_keep_min'] * 100)}% of the anchor's words while adding at most {flt['trap_add_max']} new ones |",
         "| 4. Split | 80 / 10 / 10 by source sentence |",
         f"| 5. Cross generator | {ctx.get('xgen_generator')} rewrites the held out test sentences, filtered the same way |",
         "| 6. Passages | Test sentences that came from a multi sentence answer are flipped inside that answer |",

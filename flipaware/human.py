@@ -5,7 +5,7 @@ import random
 import shutil
 from pathlib import Path
 
-from flipaware.common import REPO, hf_token, jaccard, load_cfg, log, read_jsonl, write_json, write_jsonl
+from flipaware.common import REPO, edit_check, hf_token, load_cfg, log, read_jsonl, write_json, write_jsonl
 
 
 def data_repo(cfg):
@@ -86,7 +86,7 @@ def pull(cfg):
         if s["anchor"].lower() in train_anchors:
             stats["leaked"] += 1
             continue
-        if jaccard(s["anchor"], s["trap"]) < cfg["filter"]["trap_overlap_min"]:
+        if edit_check(s["anchor"], s["paraphrase"], s["trap"], cfg["filter"]):
             stats["low_overlap"] += 1
             continue
         stats["approved"] += 1

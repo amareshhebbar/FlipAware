@@ -1,0 +1,6 @@
+tensorboard
+matplotlib
+pandas
+pyarrow
+pyyaml
+numpy

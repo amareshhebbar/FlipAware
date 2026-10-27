@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 python -m pip install -q -U pip
+python -m pip install -q -r requirements-base.txt
 python -m pip install -q -U -r requirements.txt
 
 PLATFORM=$(python -m flipaware.common)
@@ -20,7 +21,7 @@ fi
 TRACKERS="${FLIP_TRACKERS:-tensorboard,mlflow}"
 for t in ${TRACKERS//,/ }; do
   case "$t" in
-    mlflow) python -m pip install -q mlflow || echo "mlflow install failed, it will be skipped" ;;
+    mlflow) python -m pip install -q mlflow "pyarrow<26" || echo "mlflow install failed, it will be skipped" ;;
     aim) python -m pip install -q aim || echo "aim install failed, it will be skipped" ;;
     clearml) python -m pip install -q clearml || echo "clearml install failed, it will be skipped" ;;
   esac
