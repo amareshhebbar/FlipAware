@@ -2,7 +2,7 @@ import csv
 import math
 import random
 
-from flipaware.common import SPLIT, load_cfg, log, read_jsonl, write_jsonl
+from flipaware.common import SPLIT, file_sig, load_cfg, log, read_jsonl, reset_from, stamp_ok, text_sig, write_jsonl, write_stamp
 
 COLS = ("id", "type", "seed_id", "anchor", "paraphrase", "trap")
 
@@ -73,6 +73,12 @@ def build_passages(cfg):
 def main():
     cfg = load_cfg()
     data, res = cfg["paths"]["data"], cfg["paths"]["results"]
+    if not file_sig(data / "filtered.jsonl") or not read_jsonl(data / "filtered.jsonl"):
+        raise SystemExit("filtered.jsonl is empty. Stage 3 kept nothing: read its rejected examples, then rerun stages 2 and 3")
+    sig = text_sig(file_sig(data / "filtered.jsonl"), file_sig(data / "seeds.jsonl"))
+    if (data / "test.jsonl").exists() and not stamp_ok(cfg, "splits", sig):
+        log("filtered data changed: rebuilding splits and clearing every later output that used the old data")
+        reset_from(cfg, 4)
     jobs = [
         (data / "test.jsonl", build_splits),
         (res / "handcheck.csv", build_handcheck),
@@ -83,6 +89,7 @@ def main():
             log(f"skip {path.name}")
             continue
         fn(cfg)
+    write_stamp(cfg, "splits", sig)
 
 
 if __name__ == "__main__":
